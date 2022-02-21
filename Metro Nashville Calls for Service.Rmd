@@ -1,0 +1,140 @@
+---
+title: "Metro Nashville Calls for Service"
+author: "Vienna Thompkins"
+date: "2/13/2022"
+output: html_document
+---
+
+# Setup
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+options(scipen = 999)
+```
+
+```{r, warning = FALSE, message = FALSE}
+# load packages
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+```
+
+```{r}
+# load data
+dat <- read.csv("Metro_Nashville_Police_Department_Calls_for_Service.csv")
+```
+
+# Cleaning
+
+```{r}
+cfs <- dat %>%
+  mutate(Call.Received = as.POSIXct(Call.Received, format = "%m/%d/%Y %I:%M:%S %p"),
+         day = day(Call.Received),
+         week = week(Call.Received),
+         month = month(Call.Received),
+         year = year(Call.Received),
+         lat_long = str_extract(Mapped.Location, "\\(([^\\)]+)\\)"),
+         lat = str_extract(lat_long, "^([^\\s]+)"),
+         long = str_extract(lat_long, "([^\\s]+)$")) %>%
+  mutate_at(vars(Tencode.Description, Tencode.Suffix, Tencode.Suffix.Description, Disposition.Code, Disposition.Description),
+            as.factor)
+```
+
+# Analysis
+
+```{r}
+# calls by date
+cfs_date <- cfs %>%
+  mutate(date = as.Date(paste0(year, "-", month, "-", day))) %>%
+  group_by(date) %>%
+  summarise(count = n())
+
+ggplot(cfs_date, aes(x = date, y = count)) +
+  geom_point()
+
+# calls by month
+cfs_month <- cfs %>%
+  mutate(months = paste0(year, "-", month, "-01")) %>%
+  group_by(months) %>%
+  summarise(count = n())
+
+cfs_month$months <- as.Date(cfs_month$months, format = "%Y-%m-%d")
+
+cfs_month <- cfs_month %>%
+  arrange(months)
+
+ggplot(cfs_month, aes(x = months, y = count)) +
+  geom_smooth(method = "glm") +
+  geom_point()
+
+```
+
+```{r}
+# calls by Tencode
+cfs_TCA <- cfs %>%
+  mutate(months = paste0(year, "-", month, "-01")) %>%
+  group_by(Tencode.Description, months) %>%
+  summarise(count = n())
+
+cfs_TCA$months <- as.Date(cfs_TCA$months, format = "%Y-%m-%d")
+
+cfs_TCA
+
+ggplot(cfs_TCA, aes(y = count, x = months, color = Tencode.Description)) +
+  geom_line()
+
+TCA_top_10 <- c("WANT OFFICER FOR INVESTIGATION / ASSISTA", "BUSINESS CHECK", "TRAFFIC VIOLATION", "COMMUNITY POLICING ACTIVITY", "DISORDERLY PERSON", "VEHICLE ACCIDENT - PROPERTY DAMAGE", "THEFT", "SAFETY HAZARD", "SUSPICIOUS PERSON", "BURGLARY - RESIDENCE")
+
+cfs_TCA_top <- cfs_TCA %>%
+  filter(Tencode.Description %in% TCA_top_10) %>%
+  arrange(months)
+  
+cfs_TCA_top
+
+ggplot(cfs_TCA_top, aes(y = count, x = months, color = Tencode.Description)) +
+  geom_line()
+
+
+cfs_TCA_top_recent <- cfs_TCA_top %>%
+  filter(months >= "2019-01-01" & months < "2022-01-01")
+
+ggplot(cfs_TCA_top_recent, aes(y = count, x = months, color = Tencode.Description)) +
+  geom_line()
+```
+
+
+```{r}
+# categories
+TCA_safety <- c("BARRICADED SUSPECT", "BURGLARY - NON-RESIDENCE", "BURGLARY - RESIDENCE", "CORPSE / D. O. A.", "CUTTING / STABBING", "FIGHT / ASSAULT", "GANG ACTIVITY", "HOLDUP / ROBBERY", "KIDNAPPING", "MISSING PERSON", "PERSON WITH WEAPON", "SAFETY HAZARD", "SHOOTING", "SHOTS FIRED")
+
+TCA_property <- c("BANK ROBBERY", "BUSINESS CHECK", "THEFT")
+
+TCA_disorder <- c("INTOXICATED PERSON", "PERSON INDECENTLY EXPOSED", "PERSON SCREAMING", "DANGEROUS / INJURED ANIMAL", "DISORDERLY PERSON", "PROWLER", "SUSPICIOUS PERSON")
+
+TCA_mental_health <- c("MENTALLY ILL PERSON", "SUICIDAL PERSON")
+
+TCA_proactive <- c("COMMUNITY POLICING ACTIVITY", "WANT OFFICER FOR INVESTIGATION / ASSISTA")
+
+TCA_vehicle <- c("TRAFFIC VIOLATION", "VEHICLE BLOCKING RIGHT OF WAY", "VEHICLE ACCIDENT - PERSONAL INJURY", "VEHICLE ACCIDENT - PROPERTY DAMAGE")
+
+cfs <- cfs %>%
+  mutate(TCA_category = if_else(Tencode.Description %in% TCA_safety, "Safety",
+                        if_else(Tencode.Description %in% TCA_property, "Property",
+                        if_else(Tencode.Description %in% TCA_disorder, "Disorder",
+                        if_else(Tencode.Description %in% TCA_mental_health, "Mental Health",
+                        if_else(Tencode.Description %in% TCA_proactive, "Proactive",
+                        if_else(Tencode.Description %in% TCA_vehicle, "Vehicle", "Other")))))))
+```
+
+
+```{r}
+cfs_tca_cat <- cfs %>%
+  mutate(months = paste0(year, "-", month, "-01")) %>%
+  group_by(TCA_category, months) %>%
+  summarise(count = n())
+
+ggplot(cfs_tca_cat, aes(x = months, y = count, group = TCA_category, fill = TCA_category)) +
+  geom_area()
+```
